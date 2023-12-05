@@ -8,7 +8,7 @@ namespace WebService.Shared;
 
 public partial class TaktTimeChart : ComponentBase, Common.Interfaces.IObserver<ProcessedData<int>>
 {
-    private const string DATASET_LABEL = "Gyártás sebessége";
+    private const string DATASET_LABEL = "Gyártás idő";
     
     private BarChartOptions _lineChartOptions = default!;
     private ChartData _chartData = default!;
@@ -17,7 +17,7 @@ public partial class TaktTimeChart : ComponentBase, Common.Interfaces.IObserver<
     private async Task InitChart()
     {
         _lineChartOptions = BarChartExtensions
-            .GetDefaultBarChartOptions("Gyártási sebesség", "Intervallum", "Takt time");
+            .GetDefaultBarChartOptions("Takt time", "Intervallum", "Idő (s)");
         _dataset = BarChartExtensions.GetDefaultDatasetSettings(DATASET_LABEL);
 
         _chartData = new()
