@@ -1,0 +1,61 @@
+@using WebService.Service.StatisticsServices
+@using Common.Classes
+@using WebService.Service
+
+@implements IAsyncDisposable
+@implements Common.Interfaces.IObserver<Common.Classes.ProcessedData<int>>
+
+@inject ILogger<AmountDiagram> Logger
+@inject ManufacturedAmountService AmountService
+
+<LineChart @ref="_amountChart"></LineChart>
+
+@code {
+    private LineChart _amountChart = default!;
+    private SlimEventSignaler? _resetHandlerService;
+    private long _manufacturedAmount;
+    
+    [Parameter] public EventCallback<ManufacturedState> OnProductProduced { get; set; }
+    [Parameter] public SlimEventSignaler EventSignaler
+    {
+        set
+        {
+            _resetHandlerService = value;
+            AmountService.ResetSignal = _resetHandlerService;
+            _resetHandlerService.AddTask(Clear);
+        }
+    }
+    
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            AmountService.Subscribe(this);
+            await InitAmountChart();
+        }
+        await base.OnAfterRenderAsync(firstRender);
+    }
+
+    public async Task ConsumeDataAsync(ProcessedData<int> data)
+    {
+        var oldAmount = _manufacturedAmount;
+        Interlocked.Add(ref _manufacturedAmount, data.Result);
+        var state = oldAmount == _manufacturedAmount ? ManufacturedState.Faulty : ManufacturedState.Successful;
+        
+        await _amountChart.AddDataAsync(_chartData, 
+            DateTimeOffset.FromUnixTimeMilliseconds(data.OriginalData.MqttMessage.Timestamp).ToString("T"), 
+            new LineChartDatasetData(DATASET_LABEL, _manufacturedAmount));
+        await InvokeAsync(() => OnProductProduced.InvokeAsync(state));
+    }
+
+    private async Task Clear()
+    {
+        Logger.LogInformation("Resetting AmountDiagram");
+        _manufacturedAmount = 0;
+        _dataset.Data?.Clear();
+        _chartData.Labels?.Clear();
+        await _amountChart.UpdateAsync(_chartData, _lineChartOptions);
+        await InvokeAsync(StateHasChanged);
+    }
+
+}

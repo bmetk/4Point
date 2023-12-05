@@ -1,0 +1,139 @@
+﻿@page "/"
+
+@using Common.Interfaces.Service
+@using WebService.Models
+@using WebService.Service
+@using WebService.Service.CommunicationServices
+@using Common.Classes
+@using System.Text
+
+@implements IAsyncDisposable
+
+@inject ILogger<Index> Logger
+@inject IConfiguration Configuration
+
+@inject IMqttService MqttService
+@inject MqttTopicStatusService<byte> Status
+@inject ProductionFailureHandlerService FailService;
+
+@inject RfidAuthMqttService RfidAuthMqttService
+
+<style>
+    label, input {
+        font-size: 12pt;
+    }
+</style>
+
+<div class="row">
+    <div class="col">
+        <AmountDiagram OnProductProduced="HandleProductProduced" EventSignaler="_resetEventSignaler" />
+        <TaktTimeChart EventSignaler="_resetEventSignaler" />
+    </div>
+    <div class="col">
+        <div class="mb-3 row">
+            <label for="goalAmount" class="form-label col-4">Gyártandó mennyiség</label>
+            <div class="col-4">
+                <input id="goalAmount" type="text" class="form-control" @bind="GoalAmount"/>
+            </div>
+        </div>
+        <div class="mb-3 row">
+            <label for="manufacturedAmount" class="form-label col-4">Gyártott mennyiség</label>
+            <div class="col-4">
+                <input id="manufacturedAmount" type="text" readonly class="form-control-plaintext" @bind="@_manufacturedAmount"/>
+            </div>
+        </div>
+        <div class="mb-3 row">
+            <label for="faultyAmount" class="form-label col-4">Selejtes mennyiség</label>
+            <div class="col-4">
+                <input id="faultyAmount" type="text" readonly class="form-control-plaintext" @bind="@_faultyAmount"/>
+            </div>
+        </div>
+        <div class="mb-3 row">
+            <label for="remainingTime" class="form-label col-4">Várható hátralévő idő</label>
+            <div class="col-4">
+                <input id="remainingTime" type="text" readonly class="form-control-plaintext" @bind="_remainingTime"/>
+            </div>
+        </div>
+        
+        <Alert @ref="_alert" Dismissable="false" Color=@AuthAlertColor> @AuthAlertText </Alert>
+        
+        <div class="my-2 row gy-2">
+            <div class="col">
+                <button class="@(_errorChecked ? "w-100 btn btn-lg btn-success" : "w-100 btn btn-lg btn-danger")"
+                        @onclick="ErrorCheckedTopicHandler">
+                    Gyártás indítása
+                </button>
+            </div>
+            <div class="col">
+                <button class="w-100 btn col btn-lg btn-primary" @onclick="async () => await ResetAsync()">Reset</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@* ReSharper disable InconsistentNaming *@
+@code {
+    private AlertColor AuthAlertColor = AlertModes[false].Color;
+    private string AuthAlertText = AlertModes[false].AlertText;
+
+    [Inject] ModalService ModalService { get; set; } = default!;
+
+    RfidStatusObserver? RfidStatusObserver;
+
+    private Alert _alert = default!;
+
+    private readonly SlimEventSignaler _resetEventSignaler = new();
+    
+    private int _goalAmount;
+    private int _manufacturedAmount, _faultyAmount;
+    private string _remainingTime = string.Empty;
+
+    private int GoalAmount
+    {
+        get => _goalAmount;
+        set
+        {
+            _goalAmount = value;
+            if (_remainingTimeService is not null)
+                _remainingTimeService.GoalAmount = _goalAmount;
+        }
+    }
+
+    private void HandleProductProduced(AmountDiagram.ManufacturedState state)
+    {
+        switch (state)
+        {
+            case AmountDiagram.ManufacturedState.Successful:
+                _manufacturedAmount++;
+                _remainingTimeService?.AddNextTimeAsync(DateTimeOffset.Now);
+                break;
+            case AmountDiagram.ManufacturedState.Faulty:
+                _faultyAmount++;
+                break;
+        }
+        if (_manufacturedAmount == _goalAmount)
+        {
+            MqttService.PublishAsync(MqttTopics.ErrorCheckedTopic(Configuration), Encoding.UTF8.GetBytes("0"));
+            HandleRfidAuthMessage(null).Wait(1000);
+            _errorChecked = false;
+            AlertModes[false].Deconstruct(out AuthAlertColor, out AuthAlertText);
+        }
+
+        Logger.LogInformation(
+            "_manufacturedAmount: {manufacturedAmount}\n_faultyAmount: {faultyAmount}", 
+            _manufacturedAmount, _faultyAmount);
+    }
+
+    private async Task ResetAsync()
+    {
+        {
+            Status.ChangeValue(ErrorCheckedTopic, _ => 0);
+            _errorChecked = false;
+            await MqttService.PublishAsync(ErrorCheckedTopic, AsByteArray(0));
+        }
+        _remainingTimeService = null;
+        _faultyAmount = _manufacturedAmount = _goalAmount = 0;
+        _remainingTime = string.Empty;
+        await _resetEventSignaler.CallAsync();
+    }
+}

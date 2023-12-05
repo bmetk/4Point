@@ -1,0 +1,11 @@
+.idea/
+.env
+
+WebService/bin/
+WebService/obj/
+
+MqttDataGenerator/bin/
+MqttDataGenerator/obj/
+
+Common/bin/
+Common/obj/

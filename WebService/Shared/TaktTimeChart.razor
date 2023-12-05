@@ -1,0 +1,68 @@
+@using Common.Classes
+@using Common.Extensions
+@using Common.Interfaces.Service
+@using WebService.Models
+@using WebService.Service.StatisticsServices
+
+@implements IAsyncDisposable
+
+@inject ILogger<TaktTimeChart> Logger
+@inject ManufacturedAmountService AmountService
+
+@inject IMqttService MqttService
+@inject IConfiguration Configuration
+
+<BarChart @ref="_tactChart" />
+
+@code {
+    private BarChart _tactChart = default!;
+    private SlimEventSignaler? _resetHandlerService;
+    
+    private DateTimeOffset? _startTime;
+    
+    [Parameter]
+    public SlimEventSignaler EventSignaler
+    {
+        set
+        {
+            _resetHandlerService = value;
+            _resetHandlerService.AddTask(Clear);
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            AmountService.Subscribe(this);
+            await InitChart();
+            await MqttService.SubscribeAsync(MqttTopics.WorkInProgressTopic(Configuration), WorkInProgressDataConsumer);
+        }
+        await base.OnAfterRenderAsync(firstRender);
+    }
+    
+    private void WorkInProgressDataConsumer(string topic, MqttMessage payload)
+    {
+        if(payload.Payload.AsUTF8String() == "0") return;
+        _startTime ??= DateTimeOffset.Now;
+        Logger.LogInformation("Takt time start is {startTime}", _startTime);
+    }
+    
+    public Task ConsumeDataAsync(ProcessedData<int> data)
+    {
+        AddNewDataPoint();
+        Logger.LogInformation("Product done");
+        _startTime = DateTimeOffset.Now;
+        return Task.CompletedTask;
+    }
+
+    private async Task Clear()
+    {
+        Logger.LogInformation("Resetting TaktTimeChart");
+        _startTime = null;
+        _dataset.Data?.Clear();
+        _chartData.Labels?.Clear();
+        await _tactChart.UpdateAsync(_chartData, _lineChartOptions);
+        await InvokeAsync(StateHasChanged);
+    }
+}

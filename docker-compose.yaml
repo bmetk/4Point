@@ -1,0 +1,54 @@
+services: 
+  mqtt_broker:
+     image: "eclipse-mosquitto:2.0.18"
+     ports:
+       - "1883:1883"
+     expose:
+       - "9001"
+     restart: always
+     volumes:
+       - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+  telegraf:
+    depends_on:
+      - mqtt_broker
+    image: telegraf:1.28
+    environment:
+      INFLUXDB_HOST: ${INFLUXDB_HOST}
+      INFLUXDB_TOKEN: ${INFLUXDB_TOKEN}
+      INFLUXDB_TELEGRAF_ID: "0be3ebbe8c91c000"
+    ports:
+      - "8125:8125"
+      - "8092:8092"
+      - "8094:8094"
+    restart: always
+    volumes:
+      - telegraf-vol:/etc/telegraf
+      - ./telegraf/telegraf.conf:/etc/telegraf/telegraf.conf:ro
+    links:
+      - mqtt_broker
+  web:
+    depends_on: 
+      - mqtt_broker
+    ports:
+      - "80:80"
+    build: 
+      context: .
+      dockerfile: WebService/Dockerfile
+    restart: always
+    environment:
+      INFLUXDB_HOST: ${INFLUXDB_HOST}
+      MQTT_HOST: ${MQTT_HOST}
+      MqttTopics__Relay__Auth: "ionoPi/Relay1"
+      MqttTopics__Relay__ErrorChecked: "ionoPi/Relay2"
+      MqttTopics__Di__WorkInProgress: "ionoPi/Di4"
+      MqttTopics__Di__Error: "ionoPi/Di5"
+      MqttTopics__Di__Done: "ionoPi/Di6"
+      MqttTopics__Measurements: "ionoPi/computed"
+      MqttTopics__RfidIn: "rfidauth"
+    volumes:
+      - ./WebService/appsettings.json:/app/appsettings.json:ro
+volumes: 
+  telegraf-vol:
+    name: "bmetk-telegraf-vol"
+  mqtt-vol:
+    name: "bmetk-mqtt-vol"
